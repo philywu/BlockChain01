@@ -143,96 +143,10 @@ public class TxHandler {
 		return null;
 	}
 
-	public double consumeUTXO(UTXO utxo) {
-		double val = utxoPool.getTxOutput(utxo).value;
-		//utxoPool.removeUTXO(utxo);
-		return val ; 
-	}
+	
 	public static ArrayList<byte []> messageList = new ArrayList();
 	
-	public static void main(String[] args) {
-		
-		Transaction transaction = genTx(6,null);
-		for(int a = 0;a<6;a++) {
-			boolean b = Crypto.verifySignature(transaction.getOutput(a).address, messageList.get(a), transaction.getInput(a).signature);
-			System.out.println("input " +a +" is " +b);
-		}
-		messageList.clear();
-		transaction.finalize();
-		Transaction transaction1 = genTx(8,transaction);
-		for(int a = 0;a<8;a++) {
-			boolean b = Crypto.verifySignature(transaction1.getOutput(a).address,
-					messageList.get(a),
-					transaction1.getInput(a).signature);
-			System.out.println("input " +a +" is " +b);
-		}
-	}
-	public static Transaction genTx(int count,Transaction prevTx) {
-		Transaction  tx=new Transaction();
-		byte[] prevHash = null ; 
-		if (prevTx !=null)
-				prevHash = prevTx.getHash();
-		for (int i=0;i<count;i++) {
-			KeyPair keyPair = genKeyPair();
-			double value = (i+1)*100 ;
-			
-				
-				tx.addOutput(value, keyPair.getPublic());
-				tx.addInput(prevHash,i);
-				byte[] message = tx.getRawDataToSign(i);
-				tx.addSignature(genSignature(keyPair.getPrivate(),message), i);
-				messageList.add(message);
-				//tx.finalize();
-				//prevHash = tx.getHash();
-		}
-		return tx; 
-		
-		
-	}
-	public static KeyPair genKeyPair() {
-		KeyPairGenerator keyPairGenerator;
 	
-			try {
-				keyPairGenerator = KeyPairGenerator.getInstance("RSA");
-				keyPairGenerator.initialize(1024); // KeySize
-				KeyPair keyPair = keyPairGenerator.generateKeyPair();
-				return keyPair;
-				//PrivateKey privateKey = keyPair.getPrivate();
-			//	PublicKey publicKey = keyPair.getPublic();
-			//	return publicKey;
-
-			
-			} catch (NoSuchAlgorithmException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-				return null;
-			}
-			
-		
-		
-	}
-	public static byte[] genSignature(PrivateKey pKey, byte[] message) {
-        Signature sig = null;
-        try {
-            sig = Signature.getInstance("SHA256withRSA");
-        } catch (NoSuchAlgorithmException e) {
-            e.printStackTrace();
-        }
-        try {
-            sig.initSign(pKey);
-        } catch (InvalidKeyException e) {
-            e.printStackTrace();
-        }
-        try {
-            sig.update(message);
-            return sig.sign();
-        } catch (SignatureException e) {
-            e.printStackTrace();
-        }
-        return null;
-
-    }
-
 	public Transaction findTransaction(byte[] prevTxHash, ArrayList<Transaction> txs) {
 		
 		return findTransaction(prevTxHash,txs.toArray(new Transaction[txs.size()]));

@@ -7,9 +7,11 @@ import java.security.PublicKey;
 import java.security.Signature;
 import java.security.SignatureException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
 
 
 
@@ -19,7 +21,7 @@ public class TxOperation {
 	public static String C_PREINDEX = "preIndex";
 	public static String C_PREVALUE = "preValue";
 	private Map<String, KeyPair> users;
-	//private TxHandler txHdl = new TxHandler(new UTXOPool());
+	private TxHandler txHdl = new TxHandler(new UTXOPool());
 	private ArrayList<Transaction> txList = new ArrayList<Transaction>() ;
 	
 
@@ -39,21 +41,19 @@ public class TxOperation {
 		tx.addOutput(100, users.get("Luke").getPublic());
 		tx.addOutput(200, users.get("Phily").getPublic());
 		tx.addOutput(50, users.get("Robert").getPublic());
-
+		tx.addOutput(50, users.get("Robert").getPublic());
 		// Transaction[] txs = {tx};
 		//txHdl.completeTransaction(tx);
+		tx.finalize();
+		Transaction[] orderedTxs = txHdl.handleTxs(new Transaction[]{tx});
 		
-		addToTxList(tx);
+		addToTxList(orderedTxs);
 		return tx;
 	}
 	public Transaction getTransaction(int pos) {
 		return txList.get(pos);
 	}
-	public Transaction getLastTransaction() {
-		if (txList.size()>0)
-			return txList.get(txList.size()-1);
-		else return null;
-	}
+	
 	public Transaction findTransaction(byte[] hashCode) {
 		if(txList.size()>0){
 			int index = txList.size() - 1 ; 
@@ -70,38 +70,7 @@ public class TxOperation {
 			return null ; 
 		}
 	}
-	public List<Map> findInput(double targetValue,PublicKey payerAddress ){
-		List<Map> inputList = new ArrayList<Map>();
-		double val = targetValue;
-		if (txList.size()>0){
-			int txIndex = txList.size()-1 ; 						
-			//if need more input to pay one ouput
-			while (val > 0 ){
-				Transaction preTx = getTransaction(txIndex);
-				
-				for (int preOutputIndex = 0 ;preOutputIndex<preTx.getOutputs().size();preOutputIndex++){
-					Transaction.Output preOp = preTx.getOutput(preOutputIndex);
-					if (preOp.address.equals(payerAddress) && val>0) {
-						Map input= new HashMap();
-						//targetTx.addInput(, preOutputIndex);
-						input.put(C_PREHASH, preTx.getHash());
-						input.put(C_PREINDEX, preOutputIndex);	
-						input.put(C_PREVALUE, preOp.value);
-						inputList.add(input);
-						//calculate rest value
-						val -= preOp.value;
-					}
-				}
-				txIndex -- ; 
-			}
-			
-		} 
-		if (val>0) { // cannot find enough input value
-			return null;
-		} else {
-			return inputList;
-		}
-	}
+	
 	public static Map<String, KeyPair> generateUser() {
 		Map<String, KeyPair> map = new HashMap<String, KeyPair>();
 		String[] users = { "Luke", "Phily", "Robert", "Lee", "Mason", "Henry", "Danny" };
@@ -132,17 +101,35 @@ public class TxOperation {
 
 	}
 	public void addToTxList(Transaction tx) {
-		tx.finalize();
+		
 		txList.add(tx);
+	}
+	public void addToTxList(Transaction[] txs) {
+		for (Transaction tx: txs){ 
+			addToTxList(tx); 
+		}
 	}
 	public static ArrayList<Transaction> genTxs(TxOperation txo) {
 
-		txo.createCoins();
-
-		String[][] trans = { { "Robert", "Mason", "50" }, { "Luke", "Lee", "30" }, { "Phily", "Henry", "20" },{ "Phily", "Danny", "40" } };
-
-		Transaction tx = txo.addTransaction(trans);
+		ArrayList<Transaction> tList = new ArrayList<Transaction>();
 		
+		txo.createCoins();
+		
+		
+		String[][] trans = { { "Mason", "80" },{ "Luke", "50" } };
+
+		Transaction tx = txo.addTransaction("Robert",trans);
+		tList.add(tx);
+		String[][] trans1 = { { "Lee", "60" },{ "Henry", "10" } };
+
+		 tx = txo.addTransaction("Phily",trans1);
+		
+		 tList.add(tx);
+		 String[][] trans2 = { { "Danny", "40" },{ "Luke", "10" } };
+
+		 tx = txo.addTransaction("Phily",trans2);
+		 tList.add(tx);
+		/*
 		String[][] trans1 = { { "Luke", "Danny", "50" }, { "Phily", "Mason", "50" }, { "Lee", "Robert", "30" } };
 
 		tx = txo.addTransaction(trans1);
@@ -150,73 +137,82 @@ public class TxOperation {
 		String[][] trans2 = { { "Phily", "Luke", "50" }, { "Robert", "Henry", "30" }, { "Mason", "Phily", "30" } };
 
 		tx = txo.addTransaction(trans2);
-		
-
+		*/
+		Transaction[] orderedTxs = txo.txHdl.handleTxs(tList.toArray(new Transaction[tList.size()]));
+		txo.addToTxList(orderedTxs);
 		return txo.txList;
 	}
 
-	private Transaction addTransaction(String[][] trans) {
+	private Transaction addTransaction(String user, String[][] trans) {
 		//
-
+		KeyPair payer =  users.get(user);
 		if (trans != null) {
+			
+			UTXOPool userPool = txHdl.getUTXOByUser( payer.getPublic());
 			Transaction tx = new Transaction();
 			for (String[] rec : trans) {
-				double val = Double.parseDouble(rec[2]);
-				//List<UTXO> inputList = txHdl.findTransactionInput(users.get(rec[0]).getPublic(), val,chain.toArray(new Transaction[chain.size()]));
-				KeyPair payer =  users.get(rec[0]);
-				KeyPair receiver =  users.get(rec[1]);
-				//find from current transaction output, if receiver equals to payer, find value from their first  
-				ArrayList<Transaction.Output> currentOutputs = (ArrayList<Transaction.Output>) tx.getOutputs().clone();
-				for (Transaction.Output currentOP: currentOutputs){
-					if (currentOP.address.equals(payer.getPublic())) {
-						if (currentOP.value>val) {//enough value
-							///currentOP.value -= val;	
-							double v  = currentOP.value - val ; 
-							tx.getOutputs().remove(currentOP);
-							tx.addOutput(v, currentOP.address);
-						} else {
-							tx.getOutputs().remove(currentOP);
-							val -= currentOP.value;
+				double val = Double.parseDouble(rec[1]);
+				double outputVal = val ;
+				KeyPair receiver =  users.get(rec[0]);
+				
+				//find input from user's utxo 
+				for (UTXO ut:userPool.getAllUTXO()) {
+					double inputVal = userPool.getTxOutput(ut).value;
+					if (val >0) {
+						//add input
+						//if this UTXO is not used in current input
+						if(!isUsedInCurrentInput(ut,tx.getInputs())){
+							tx.addInput(ut.getTxHash(), ut.getIndex());
+							//add signature
+							
+							val -= inputVal;
 						}
-						tx.addOutput(val, receiver.getPublic());
+					} else {
+						break;
 					}
 				}
-				
-				//find input from previous input
-				if (val >0 ) {
-				List<Map> inputList = findInput(val,payer.getPublic());
-				
-				if (inputList != null) {
-					double sumValue = 0 ; 
-					for (Map inputMap:inputList) {
-						double value = (double) inputMap.get(C_PREVALUE);
-						tx.addInput((byte[])inputMap.get(C_PREHASH), (int)inputMap.get(C_PREINDEX));
-						//byte[] message = tx.getRawDataToSign(tx.getInputs().size()-1);
-						sumValue += value ; 
-					}
-					// pay to receiver
-					tx.addOutput(val,  receiver.getPublic());
-					if (sumValue>val) {
+				if (val<=0){
+					tx.addOutput(outputVal,  receiver.getPublic());
+					if (val<0) {
 						// if not exact same , keep the change to payer
-						tx.addOutput(sumValue - val, payer.getPublic());
+						tx.addOutput(-val, payer.getPublic());
 					}
-					//add signature
+					
+					
 					
 				} else {// not enough credit
-					System.out.println("###ERROR: Cannot find correct input for " + rec[0] + " with value " + rec[2]);
+					System.out.println("###ERROR: Cannot find enough input for " + user + " to "+ rec[0]+ " with value " + rec[1]);
 				}
+				//add signature
+				for (int ipIndex=0 ; ipIndex<tx.numInputs();ipIndex++){
+					byte [] message = tx.getRawDataToSign(ipIndex);
+					byte [] signature = genSignature(payer.getPrivate(), message);
+					tx.addSignature(signature, ipIndex);
+					
 				}
+				
 				
 
 			}
 			//txHdl.completeTransaction(tx);
+			tx.finalize();
 			
-			addToTxList(tx);
+			//addToTxList(tx);
 			return tx;
 		} else {
 			return null;
 		}
 
+	}
+
+	private boolean isUsedInCurrentInput(UTXO ut, ArrayList<Transaction.Input> inputs) {
+		for (Transaction.Input ip :inputs){
+			if(ut.equals(new UTXO(ip.prevTxHash,ip.outputIndex))){
+				return true;
+			}
+		}
+		return false; 
+		
 	}
 
 	public String getUser(PublicKey pk) {
@@ -252,8 +248,9 @@ public class TxOperation {
 	public static void printInfo(TxOperation txo) {
 		// print utxo pool
 		ArrayList<Transaction>txs = txo.txList;
+		
 		System.out.println("############ UTXO POOL ###########");
-		/*
+		
 		for (UTXO utxo : txo.txHdl.utxoPool.getAllUTXO()) {
 			Transaction.Output op = txo.txHdl.utxoPool.getTxOutput(utxo);
 
@@ -268,7 +265,7 @@ public class TxOperation {
 			System.out.println(txo.getUser(op.address) + " " + utxo.getTxHash().hashCode() + " " + utxo.getIndex() + " "
 					+ op.value);
 		}
-		*/
+		
 		// print transaction
 		System.out.println("############ TRANSACTION ###########");
 		int i = 0;
@@ -277,7 +274,7 @@ public class TxOperation {
 			System.out.println("    ====== OUTPUT ========");
 			int index = 0;
 			for (Transaction.Output txop : tx.getOutputs()) {
-				System.out.println(index++ + ": " + txo.getUser(txop.address) + txop.value);
+				System.out.println(index++ + ": " + txo.getUser(txop.address) +" " + txop.value);
 
 			}
 			System.out.println("    ====== Input ========");
@@ -306,7 +303,7 @@ public class TxOperation {
 		TxOperation txo = new TxOperation(map);
 		ArrayList<Transaction> txs = genTxs(txo);
 		printInfo(txo);
-		System.out.println(txs.size());
+		System.out.println("----------END--------------");
 
 	}
 

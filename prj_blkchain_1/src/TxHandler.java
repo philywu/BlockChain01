@@ -9,6 +9,7 @@ import java.security.Signature;
 import java.security.SignatureException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 public class TxHandler {
 
@@ -35,44 +36,64 @@ public class TxHandler {
 	public boolean isValidTx(Transaction tx) {
 		// IMPLEMENT THIS
 		// TODO
+		
 		if (tx ==null ) {
 			return false ;
 		} 
-		//(1) all outputs claimed by {@code tx} are in the current
-		int opIndex = 0 ;		
-		for (Transaction.Output op: tx.getOutputs()){
+		//this is a create coin transaction
+		if(tx.numInputs()==0){
+			return true;
+		}
 		
-			UTXO utxo = new UTXO(tx.getHash(),opIndex);
-			if (utxoPool.contains(utxo)){
-				Transaction.Output utOp = utxoPool.getTxOutput(utxo);
-				if (!(op.address.equals(utOp.address) && utOp.value == op.value) ) {
-					return false ;
-				} else {
-					//continue to next output
-				}
-					
-			} else {
-				return false ; 
+		int ipIndex = 0 ;
+		int sumInput = 0 ;
+		int sumOutput = 0 ; 
+		for (Transaction.Input input: tx.getInputs()){
+			UTXO utxo = new UTXO(input.prevTxHash,input.outputIndex);
+			//(1) all outputs claimed by {@code tx} are in the current
+			if (!utxoPool.contains(utxo)){
+				return false;
 			}
 			
-			;
-			opIndex ++ ; 
-		}
-		//(2) the signatures on each input of {@code tx} are  valid
-		if (tx.getInputs() !=null ){
-			int ipIndex = 0 ;
-			for (Transaction.Input ip:tx.getInputs()){
-				//find previous tx 
-				Transaction.Output preOutput = utxoPool.getTxOutput(new UTXO(ip.prevTxHash,ip.outputIndex));
-				if (!Crypto.verifySignature(preOutput.address,
-						tx.getRawDataToSign(ipIndex), ip.signature))
-						return false ;
-				ipIndex ++ ; 
+			
+			//(2) the signatures on each input of {@code tx} are  valid
+			Transaction.Output preOutput = utxoPool.getTxOutput(utxo);
+			if (!Crypto.verifySignature(preOutput.address,
+					tx.getRawDataToSign(ipIndex), input.signature))		
+				return false ;
+			//(3) no UTXO is claimed multiple times by {@code tx}
+			if (this.usedUTXOPool.contains(utxo)){
+				//if this UTXO has been claimed by previous tx, return false
+				return false;
+			} else {
+				//if not claimed add to the claim list
+				this.usedUTXOPool.addUTXO(utxo, preOutput);
 			}
-		} //else input is empty means it's a create coin transaction , natually it's good
+			
+			sumInput += preOutput.value;
+			ipIndex++;
+		}
+		for (Transaction.Output output : tx.getOutputs() ){
+			double val = output.value;
+			if (val <0){
+				//(4) all of {@code tx}s output values are non-negative
+				return false;
+			}
+			sumOutput+= val;
+		}
+		//(5) sum of {@code tx}s input values is greater than or equal to the
+		//*         sum of its output values;
+		if (sumInput<sumOutput){
+			return false ; 
+		}
+		
+		
 		return true ; 
 		
+		
 	}
+	
+	private UTXOPool usedUTXOPool ;
 
 	/**
 	 * Handles each epoch by receiving an unordered array of proposed
@@ -83,73 +104,55 @@ public class TxHandler {
 	public Transaction[] handleTxs(Transaction[] possibleTxs) {
 		// IMPLEMENT THIS
 		// TODO
-		return null;
-	}
-	public Transaction completeTransaction(Transaction tx) {
-		// IMPLEMENT THIS
-		tx.finalize();
-		byte [] hash = tx.getHash();
-		int index = 0 ;
-		for (Transaction.Output op : tx.getOutputs()) {
-			
-			UTXO u = new UTXO(hash,index);
-			utxoPool.addUTXO(u, op);			
-			index ++;
-			
-		}
-		for (Transaction.Input ip : tx.getInputs()) {
-			
-			UTXO utxo = new UTXO(ip.prevTxHash,ip.outputIndex);
-			utxoPool.removeUTXO(utxo);
-					
-			index ++;
-			
-		}
-		return tx;
-	}
-	public List<UTXO>findTransactionInput(PublicKey pk, double value, Transaction[] transactions) {
 		
-		List<UTXO> list = new ArrayList<UTXO> ();
-		ArrayList<UTXO> allList = utxoPool.getAllUTXO();
-		for (UTXO utxo : allList) {
-			if (value <=0 ) break ; 
-			Transaction.Output op = utxoPool.getTxOutput(utxo);
-			if (op.address.equals(pk)) {
-				Transaction prevTx = findTransaction(utxo.getTxHash(),transactions);
-				//if (isValidTx(prevTx)) {					
-					list.add(utxo);
-					value -= op.value;
-				//}
-			}
-		}
-		// value > 0 means don't have enough credit to pay
-		if (value >0) {
-			return null ;
-		} else {
-			return list;
-		}
-	}
-
-	public Transaction findTransaction(byte [] hashCode, Transaction[] txs){
-		for (Transaction tx: txs){
-			if (tx.hashCode()==hashCode.hashCode()) return tx; 
+		ArrayList<Transaction> txList = new ArrayList<Transaction> ();
+		
+		this.usedUTXOPool = new UTXOPool();
+		
+		//loop for each possible transactions
+		for (Transaction tx:possibleTxs) {
+			if (isValidTx(tx)) {
+				//1. update UTXO pool 
+				//remove input from pool
+				if (tx.numInputs()>0) {// tx input = 0 means creat coin transaction
+					for (Transaction.Input txInput: tx.getInputs()) {
+						UTXO utxoOld = new UTXO(txInput.prevTxHash,txInput.outputIndex);
+						if (utxoPool.contains(utxoOld)) {
+							utxoPool.removeUTXO(utxoOld);
+						}
+					}
+				}
+				//add output to pool 
+				int outputIndex =0 ;
+				for (Transaction.Output txOuput:tx.getOutputs()) {
+					UTXO utxoNew = new UTXO(tx.getHash(), outputIndex++ );
+					utxoPool.addUTXO(utxoNew, txOuput);
+				}
+				//2. add to return list
+				txList.add(tx);
 				
-			
-			if (tx.matchHash(hashCode)) {
-				return tx;
 			}
-			
 		}
-		return null;
+		return txList.toArray(new Transaction[txList.size()]);
 	}
-
-	
-	public static ArrayList<byte []> messageList = new ArrayList();
-	
-	
-	public Transaction findTransaction(byte[] prevTxHash, ArrayList<Transaction> txs) {
+	public UTXOPool getUTXOByUser(PublicKey user) {
+		UTXOPool userPool = new UTXOPool();
+		List<UTXO> utxoList = utxoPool.getAllUTXO();
+		/*
+		List<UTXO> filterList = utxoList.stream().filter(u -> {
+			Transaction.Output op = utxoPool.getTxOutput(u);
+			return ( op!=null && op.address.equals(user));
+		}).collect(Collectors.toList());
+		*/
+		for (UTXO utxo: utxoList) {
+			Transaction.Output op = utxoPool.getTxOutput(utxo);
+			if (op.address.equals(user)) {
+				userPool.addUTXO(utxo, op);
+			}
+		}
 		
-		return findTransaction(prevTxHash,txs.toArray(new Transaction[txs.size()]));
+		
+		return userPool; 
 	}
 
 }
